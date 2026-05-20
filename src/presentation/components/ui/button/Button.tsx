@@ -28,6 +28,19 @@ type ButtonAsAnchorProps = ButtonBaseProps &
 
 type ButtonProps = ButtonAsButtonProps | ButtonAsAnchorProps
 
+function omitProps<T extends object, K extends keyof T>(
+  value: T,
+  keys: readonly K[],
+): Omit<T, K> {
+  const clone = { ...value }
+
+  keys.forEach((key) => {
+    delete clone[key]
+  })
+
+  return clone
+}
+
 const variantClasses: Record<ButtonVariant, string> = {
   primary:
     'border border-transparent bg-brand-yellow text-text-primary hover:bg-[#f0bb34] focus-visible:outline-text-primary',
@@ -65,14 +78,13 @@ export function Button(props: ButtonProps) {
   )
 
   if ('href' in props) {
-    const {
-      children: _children,
-      className: _className,
-      fullWidth: _fullWidth,
-      size: _size,
-      variant: _variant,
-      ...anchorProps
-    } = props as ButtonAsAnchorProps
+    const anchorProps = omitProps(props as ButtonAsAnchorProps, [
+      'children',
+      'className',
+      'fullWidth',
+      'size',
+      'variant',
+    ] as const)
 
     return (
       <a className={classes} {...anchorProps}>
@@ -81,23 +93,18 @@ export function Button(props: ButtonProps) {
     )
   }
 
-  const {
-    children: _children,
-    className: _className,
-    fullWidth: _fullWidth,
-    size: _size,
-    variant: _variant,
-    disabled,
-    type = 'button',
-    ...buttonProps
-  } = props as ButtonAsButtonProps
+  const buttonElementProps = omitProps(props as ButtonAsButtonProps, [
+    'children',
+    'className',
+    'fullWidth',
+    'size',
+    'variant',
+  ] as const)
 
   return (
     <button
-      type={type}
-      disabled={disabled}
       className={classes}
-      {...buttonProps}
+      {...buttonElementProps}
     >
       {children}
     </button>

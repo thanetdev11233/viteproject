@@ -88,7 +88,7 @@ export function useDashboardStream({
     return () => {
       window.clearInterval(timer)
     }
-  }, [applyRows])
+  }, [])
 
   const summary = useMemo(() => {
     const totalVolume = rows.reduce((sum, row) => sum + row.volume, 0)
