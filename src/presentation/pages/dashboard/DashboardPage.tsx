@@ -180,7 +180,9 @@ export function DashboardPage({
   }
 
   return (
-    <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.25),_transparent_26%),linear-gradient(180deg,_#f7f9fc_0%,_#edf3fb_100%)] pb-16 text-slate-900">
+    <div className="min-h-screen .bg-\[radial-gradient\(circle_at_top_left\,_rgba\(56\,189\,248\,0\.25\)\,_transparent_26\%\)\,linear-gradient\(180deg\,_\#f7f9fc_0\%\,_\#edf3fb_100\%\)\] {
+    background-image: radial-gradient(circle at top left, rgba(56,189,248,0.25), transparent 26%),linear-gradient(180deg, #f7f9fc 0%, #edf3fb 100%);
+} pb-16 text-slate-900">
       <Container className="pt-8 sm:pt-10 lg:pt-12" size="wide">
         <div className="rounded-[36px] border border-white/60 bg-white/55 p-6 shadow-[0_25px_80px_rgba(15,23,42,0.10)] backdrop-blur sm:p-8">
           <div className="flex flex-col gap-6 border-b border-slate-200/80 pb-8 lg:flex-row lg:items-end lg:justify-between">
