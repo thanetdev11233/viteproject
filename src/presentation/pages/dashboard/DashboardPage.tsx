@@ -1,11 +1,17 @@
-import { memo, useState } from 'react'
+import { memo, useState, useSyncExternalStore } from 'react'
+import type { ReactNode } from 'react'
 
 import type { InstrumentRepository } from '../../../domain/repositories/InstrumentRepository'
 import { useAuth } from '../../auth/useAuth'
 import { Container } from '../../components/ui/container/Container'
 import { DashboardDataTable } from '../../components/dashboard/DashboardDataTable'
+import { DashboardStreamControlProvider } from '../../dashboard/DashboardStreamControlContext'
 import { useActiveInstruments } from '../../hooks/useActiveInstruments'
 import { useDashboardStream } from '../../hooks/useDashboardStream'
+import {
+  dashboardQuoteStore,
+  type DashboardQuoteSummaryField,
+} from '../../stores/dashboardQuoteStore'
 
 const dashboardWebsocketUrl =
   (import.meta.env.VITE_DASHBOARD_WS_URL as string | undefined) ??
@@ -17,13 +23,13 @@ type DashboardPageProps = {
 }
 
 const SummaryCard = memo(function SummaryCard({
+  children,
   eyebrow,
   title,
-  value,
 }: {
+  children: ReactNode
   eyebrow: string
   title: string
-  value: string
 }) {
   return (
     <article className="rounded-[28px] border border-white/65 bg-white/82 p-6 shadow-[0_18px_55px_rgba(15,23,42,0.08)] backdrop-blur">
@@ -31,11 +37,35 @@ const SummaryCard = memo(function SummaryCard({
         {eyebrow}
       </p>
       <h2 className="mt-3 text-sm font-medium text-slate-500">{title}</h2>
-      <p className="mt-6 text-4xl font-semibold tracking-tight text-slate-950">
-        {value}
-      </p>
+      {children}
     </article>
   )
+})
+
+const SummaryValue = memo(function SummaryValue({
+  value,
+}: {
+  value: number
+}) {
+  return (
+    <p className="mt-6 text-4xl font-semibold tracking-tight text-slate-950">
+      {value}
+    </p>
+  )
+})
+
+const SummaryMetricValue = memo(function SummaryMetricValue({
+  field,
+}: {
+  field: DashboardQuoteSummaryField
+}) {
+  const value = useSyncExternalStore(
+    (listener) => dashboardQuoteStore.subscribeSummaryField(field, listener),
+    () => dashboardQuoteStore.getSummaryField(field),
+    () => 0,
+  )
+
+  return <SummaryValue value={value} />
 })
 
 const ConnectionBadge = memo(function ConnectionBadge({
@@ -64,6 +94,57 @@ const ConnectionBadge = memo(function ConnectionBadge({
   )
 })
 
+const LastUpdateLabel = memo(function LastUpdateLabel() {
+  const lastMessageAt = useSyncExternalStore(
+    (listener) => dashboardQuoteStore.subscribeLastMessageAt(listener),
+    () => dashboardQuoteStore.getLastMessageAtSnapshot(),
+    () => null,
+  )
+
+  return (
+    <p className="text-sm text-slate-500">
+      {lastMessageAt
+        ? `Last update ${new Date(lastMessageAt).toLocaleTimeString()}`
+        : 'Waiting for first message'}
+    </p>
+  )
+})
+
+const DashboardSummaryCards = memo(function DashboardSummaryCards({
+  instrumentCount,
+}: {
+  instrumentCount: number
+}) {
+  return (
+    <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <SummaryCard
+        eyebrow="Rows"
+        title="Tracked instruments"
+      >
+        <SummaryValue value={instrumentCount} />
+      </SummaryCard>
+      <SummaryCard
+        eyebrow="Quotes"
+        title="Live quote updates"
+      >
+        <SummaryMetricValue field="totalRows" />
+      </SummaryCard>
+      <SummaryCard
+        eyebrow="Positive"
+        title="Instruments trending up"
+      >
+        <SummaryMetricValue field="positiveCount" />
+      </SummaryCard>
+      <SummaryCard
+        eyebrow="Negative"
+        title="Instruments trending down"
+      >
+        <SummaryMetricValue field="negativeCount" />
+      </SummaryCard>
+    </div>
+  )
+})
+
 export function DashboardPage({
   instrumentRepository,
   onLoggedOut,
@@ -75,10 +156,8 @@ export function DashboardPage({
   } = useActiveInstruments(instrumentRepository)
   const {
     connectionState,
-    errorMessage,
     isMock,
-    lastMessageAt,
-    summary,
+    streamControlStore,
   } = useDashboardStream({
     instruments,
     websocketUrl: dashboardWebsocketUrl,
@@ -123,11 +202,7 @@ export function DashboardPage({
               {user?.email ? (
                 <p className="text-sm text-slate-500">Signed in as {user.email}</p>
               ) : null}
-              <p className="text-sm text-slate-500">
-                {lastMessageAt
-                  ? `Last update ${new Date(lastMessageAt).toLocaleTimeString()}`
-                  : 'Waiting for first message'}
-              </p>
+              <LastUpdateLabel />
               <a
                 className="text-sm font-semibold text-slate-700 underline decoration-slate-300 underline-offset-4 transition-colors hover:text-slate-950"
                 href="/"
@@ -150,28 +225,7 @@ export function DashboardPage({
             </div>
           </div>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <SummaryCard
-              eyebrow="Rows"
-              title="Tracked instruments"
-              value={instruments.length.toString()}
-            />
-            <SummaryCard
-              eyebrow="Quotes"
-              title="Live quote updates"
-              value={summary.totalRows.toString()}
-            />
-            <SummaryCard
-              eyebrow="Positive"
-              title="Instruments trending up"
-              value={summary.positiveCount.toString()}
-            />
-            <SummaryCard
-              eyebrow="Negative"
-              title="Instruments trending down"
-              value={summary.negativeCount.toString()}
-            />
-          </div>
+          <DashboardSummaryCards instrumentCount={instruments.length} />
 
           {instrumentsError ? (
             <section className="mt-6 rounded-[28px] border border-rose-200 bg-rose-50 p-6 text-rose-700">
@@ -187,17 +241,10 @@ export function DashboardPage({
           ) : null}
 
           <div className="mt-8">
-            <DashboardDataTable instruments={instruments} />
+            <DashboardStreamControlProvider value={streamControlStore}>
+              <DashboardDataTable instruments={instruments} />
+            </DashboardStreamControlProvider>
           </div>
-
-          {errorMessage ? (
-            <section className="mt-6 rounded-[28px] border border-rose-200 bg-rose-50 p-6 text-rose-700">
-              <p className="text-xs font-semibold uppercase tracking-[0.28em]">
-                Connection issue
-              </p>
-              <p className="mt-3 text-sm leading-7">{errorMessage}</p>
-            </section>
-          ) : null}
         </div>
       </Container>
     </div>

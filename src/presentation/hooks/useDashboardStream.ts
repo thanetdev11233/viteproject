@@ -1,10 +1,11 @@
 import {
+  useCallback,
   startTransition,
   useEffect,
   useEffectEvent,
   useMemo,
+  useRef,
   useState,
-  useSyncExternalStore,
 } from 'react'
 
 import type {
@@ -12,6 +13,7 @@ import type {
   DashboardRow,
 } from '../../domain/entities/dashboard/dashboard'
 import type { InstrumentSlim } from '../../domain/models/instrument'
+import { DashboardStreamControlStore } from '../dashboard/DashboardStreamControlContext'
 import { dashboardQuoteStore } from '../stores/dashboardQuoteStore'
 
 const RECONNECT_DELAY_MS = 2500
@@ -274,6 +276,9 @@ export function useDashboardStream({
   const [connectionState, setConnectionState] =
     useState<DashboardConnectionState>(websocketUrl ? 'connecting' : 'mock')
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const isSubscribedRef = useRef(true)
+  const socketRef = useRef<WebSocket | null>(null)
+  const [streamControlStore] = useState(() => new DashboardStreamControlStore())
 
   const instrumentIds = useMemo(
     () => instruments.map((instrument) => instrument.id).filter(Boolean).sort(),
@@ -287,11 +292,6 @@ export function useDashboardStream({
     [instruments],
   )
   const subscriptionData = instrumentIds.join(',')
-  const rows = useSyncExternalStore(
-    (listener) => dashboardQuoteStore.subscribe(listener),
-    () => dashboardQuoteStore.getRowsSnapshot(),
-    () => [],
-  )
 
   const applyRows = useEffectEvent((incomingRows: DashboardRowPatch[]) => {
     if (!incomingRows.length) {
@@ -306,6 +306,47 @@ export function useDashboardStream({
   const parseAndApplyMessage = useEffectEvent((message: MessageEvent<string>) => {
     applyRows(parseDashboardRows(message, instrumentSymbolById))
   })
+
+  const sendSubscriptionEvent = useCallback(
+    (event: 'subscribe' | 'unsubscribe') => {
+      const socket = socketRef.current
+
+      if (!subscriptionData || socket?.readyState !== WebSocket.OPEN) {
+        return
+      }
+
+      debugStream(event, subscriptionData)
+      socket.send(
+        JSON.stringify({
+          event,
+          data: subscriptionData,
+        }),
+      )
+    },
+    [subscriptionData],
+  )
+
+  const subscribe = useCallback(() => {
+    isSubscribedRef.current = true
+    sendSubscriptionEvent('subscribe')
+    const currentSnapshot = streamControlStore.getSnapshot()
+    streamControlStore.setSnapshot({
+      canToggleSubscription: currentSnapshot.canToggleSubscription,
+      isSubscribed: true,
+      subscriptionData: currentSnapshot.subscriptionData || subscriptionData,
+    })
+  }, [sendSubscriptionEvent, streamControlStore, subscriptionData])
+
+  const unsubscribe = useCallback(() => {
+    isSubscribedRef.current = false
+    sendSubscriptionEvent('unsubscribe')
+    const currentSnapshot = streamControlStore.getSnapshot()
+    streamControlStore.setSnapshot({
+      canToggleSubscription: currentSnapshot.canToggleSubscription,
+      isSubscribed: false,
+      subscriptionData: currentSnapshot.subscriptionData || subscriptionData,
+    })
+  }, [sendSubscriptionEvent, streamControlStore, subscriptionData])
 
   useEffect(() => {
     if (websocketUrl) {
@@ -333,24 +374,27 @@ export function useDashboardStream({
     const streamUrl = websocketUrl
     let reconnectTimer: number | undefined
     let shouldReconnect = true
-    let socket: WebSocket | null = null
 
     function connect() {
       setConnectionState('connecting')
       setErrorMessage(null)
 
-      socket = new WebSocket(streamUrl)
+      const socket = new WebSocket(streamUrl)
+      socketRef.current = socket
 
       socket.addEventListener('open', () => {
         setConnectionState('open')
         debugStream('open', streamUrl)
-        debugStream('subscribe', subscriptionData)
-        socket?.send(
-          JSON.stringify({
-            event: 'subscribe',
-            data: subscriptionData,
-          }),
-        )
+
+        if (isSubscribedRef.current) {
+          debugStream('subscribe', subscriptionData)
+          socket.send(
+            JSON.stringify({
+              event: 'subscribe',
+              data: subscriptionData,
+            }),
+          )
+        }
       })
 
       socket.addEventListener('message', parseAndApplyMessage)
@@ -380,7 +424,9 @@ export function useDashboardStream({
         window.clearTimeout(reconnectTimer)
       }
 
-      if (socket?.readyState === WebSocket.OPEN) {
+      const socket = socketRef.current
+
+      if (isSubscribedRef.current && socket?.readyState === WebSocket.OPEN) {
         debugStream('unsubscribe', subscriptionData)
         socket.send(
           JSON.stringify({
@@ -391,21 +437,12 @@ export function useDashboardStream({
       }
 
       socket?.close()
+
+      if (socketRef.current === socket) {
+        socketRef.current = null
+      }
     }
   }, [subscriptionData, websocketUrl])
-
-  const summary = useMemo(() => {
-    const totalVolume = rows.reduce((sum, row) => sum + row.volume, 0)
-    const positiveCount = rows.filter((row) => row.change >= 0).length
-    const negativeCount = rows.filter((row) => row.change < 0).length
-
-    return {
-      totalRows: rows.length,
-      totalVolume,
-      positiveCount,
-      negativeCount,
-    }
-  }, [rows])
 
   const effectiveConnectionState: DashboardConnectionState = !websocketUrl
     ? 'mock'
@@ -414,11 +451,27 @@ export function useDashboardStream({
       : 'closed'
   const effectiveErrorMessage = subscriptionData ? errorMessage : null
 
+  useEffect(() => {
+    streamControlStore.setHandlers({
+      subscribe,
+      unsubscribe,
+    })
+  }, [streamControlStore, subscribe, unsubscribe])
+
+  useEffect(() => {
+    streamControlStore.setSnapshot({
+      canToggleSubscription:
+        Boolean(websocketUrl) &&
+        Boolean(subscriptionData) &&
+        effectiveConnectionState === 'open',
+      isSubscribed: isSubscribedRef.current,
+      subscriptionData,
+    })
+  }, [effectiveConnectionState, streamControlStore, subscriptionData, websocketUrl])
+
   return {
-    rows,
-    summary,
+    streamControlStore,
     connectionState: effectiveConnectionState,
-    lastMessageAt: rows[0]?.updatedAt ?? null,
     errorMessage: effectiveErrorMessage,
     isMock: !websocketUrl,
     websocketUrl,

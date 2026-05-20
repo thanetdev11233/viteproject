@@ -1,7 +1,8 @@
-import { memo, useMemo, useState, useSyncExternalStore } from 'react'
+import { memo, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 
 import type { DashboardRow } from '../../../domain/entities/dashboard/dashboard'
 import type { InstrumentSlim } from '../../../domain/models/instrument'
+import { useDashboardStreamControlStore } from '../../dashboard/DashboardStreamControlContext'
 import { dashboardQuoteStore } from '../../stores/dashboardQuoteStore'
 
 const PAGE_SIZE = 10
@@ -179,6 +180,63 @@ const DashboardTableRow = memo(
     previous.instrument.digit === next.instrument.digit,
 )
 
+const StreamSubscriptionToggle = memo(function StreamSubscriptionToggle() {
+  const streamControlStore = useDashboardStreamControlStore()
+  const buttonRef = useRef<HTMLButtonElement | null>(null)
+  const snapshotRef = useRef(streamControlStore.getSnapshot())
+
+  function handleToggleSubscription() {
+    if (snapshotRef.current.isSubscribed) {
+      streamControlStore.unsubscribeStream()
+    } else {
+      streamControlStore.subscribeStream()
+    }
+  }
+
+  useEffect(() => {
+    const updateButton = () => {
+      const button = buttonRef.current
+      const snapshot = streamControlStore.getSnapshot()
+      snapshotRef.current = snapshot
+
+      if (!button) {
+        return
+      }
+
+      button.ariaPressed = snapshot.isSubscribed.toString()
+      button.className = `rounded-lg px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+        snapshot.isSubscribed
+          ? 'bg-rose-100 text-rose-700 hover:bg-rose-200'
+          : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+      }`
+      button.disabled = !snapshot.canToggleSubscription
+      button.title = snapshot.subscriptionData
+        ? `${snapshot.isSubscribed ? 'Unsubscribe' : 'Subscribe'} ${
+            snapshot.subscriptionData
+          }`
+        : 'Waiting for instruments'
+      button.textContent = snapshot.isSubscribed ? 'Unsubscribe' : 'Subscribe'
+    }
+
+    updateButton()
+
+    return streamControlStore.subscribe(updateButton)
+  }, [streamControlStore])
+
+  return (
+    <button
+      aria-pressed="true"
+      className="rounded-lg px-4 py-2 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-45"
+      onClick={handleToggleSubscription}
+      ref={buttonRef}
+      title="Waiting for instruments"
+      type="button"
+    >
+      Unsubscribe
+    </button>
+  )
+})
+
 export const DashboardDataTable = memo(function DashboardDataTable({
   instruments,
 }: DashboardDataTableProps) {
@@ -213,9 +271,12 @@ export const DashboardDataTable = memo(function DashboardDataTable({
             Streaming data table
           </h3>
         </div>
-        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-          {instruments.length} instruments
-        </span>
+        <div className="flex items-center gap-3">
+          <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
+            {instruments.length} instruments
+          </span>
+          <StreamSubscriptionToggle />
+        </div>
       </div>
 
       <div className="overflow-x-auto">
