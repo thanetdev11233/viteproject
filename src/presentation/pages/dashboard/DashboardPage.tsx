@@ -1,10 +1,22 @@
+import { memo, useState } from 'react'
+
+import type { InstrumentRepository } from '../../../domain/repositories/InstrumentRepository'
+import { useAuth } from '../../auth/useAuth'
 import { Container } from '../../components/ui/container/Container'
 import { DashboardDataTable } from '../../components/dashboard/DashboardDataTable'
+import { useActiveInstruments } from '../../hooks/useActiveInstruments'
 import { useDashboardStream } from '../../hooks/useDashboardStream'
 
-const websocketUrl = import.meta.env.VITE_DASHBOARD_WS_URL as string | undefined
+const dashboardWebsocketUrl =
+  (import.meta.env.VITE_DASHBOARD_WS_URL as string | undefined) ??
+  'wss://ws-invest-dev.iuxsecure.com/api/v1/streamer'
 
-function SummaryCard({
+type DashboardPageProps = {
+  instrumentRepository: InstrumentRepository
+  onLoggedOut: () => void
+}
+
+const SummaryCard = memo(function SummaryCard({
   eyebrow,
   title,
   value,
@@ -24,9 +36,9 @@ function SummaryCard({
       </p>
     </article>
   )
-}
+})
 
-function ConnectionBadge({
+const ConnectionBadge = memo(function ConnectionBadge({
   state,
   isMock,
 }: {
@@ -50,11 +62,43 @@ function ConnectionBadge({
       {isMock ? 'mock feed' : state}
     </span>
   )
-}
+})
 
-export function DashboardPage() {
-  const { connectionState, errorMessage, isMock, lastMessageAt, rows, summary } =
-    useDashboardStream({ websocketUrl })
+export function DashboardPage({
+  instrumentRepository,
+  onLoggedOut,
+}: DashboardPageProps) {
+  const { logout, user } = useAuth()
+  const {
+    data: instruments = [],
+    error: instrumentsError,
+  } = useActiveInstruments(instrumentRepository)
+  const {
+    connectionState,
+    errorMessage,
+    isMock,
+    lastMessageAt,
+    summary,
+  } = useDashboardStream({
+    instruments,
+    websocketUrl: dashboardWebsocketUrl,
+  })
+  const [isLoggingOut, setIsLoggingOut] = useState(false)
+  const [logoutError, setLogoutError] = useState<string | null>(null)
+
+  async function handleLogout() {
+    setLogoutError(null)
+    setIsLoggingOut(true)
+
+    try {
+      await logout()
+      onLoggedOut()
+    } catch (error) {
+      setLogoutError(error instanceof Error ? error.message : 'Unable to sign out.')
+    } finally {
+      setIsLoggingOut(false)
+    }
+  }
 
   return (
     <div className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(56,189,248,0.25),_transparent_26%),linear-gradient(180deg,_#f7f9fc_0%,_#edf3fb_100%)] pb-16 text-slate-900">
@@ -69,14 +113,16 @@ export function DashboardPage() {
                 Realtime data table from WebSocket
               </h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
-                This page is prepared for a live WebSocket feed, but the current
-                implementation is still using mockup streaming data managed with
-                TanStack Query.
+                This page is prepared for a live WebSocket feed, while the
+                instruments API is requested with the Firebase ID token.
               </p>
             </div>
 
             <div className="flex flex-col items-start gap-3 lg:items-end">
               <ConnectionBadge isMock={isMock} state={connectionState} />
+              {user?.email ? (
+                <p className="text-sm text-slate-500">Signed in as {user.email}</p>
+              ) : null}
               <p className="text-sm text-slate-500">
                 {lastMessageAt
                   ? `Last update ${new Date(lastMessageAt).toLocaleTimeString()}`
@@ -88,6 +134,19 @@ export function DashboardPage() {
               >
                 Back to portfolio
               </a>
+              <button
+                className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:border-slate-950 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={isLoggingOut}
+                onClick={() => void handleLogout()}
+                type="button"
+              >
+                {isLoggingOut ? 'Signing out...' : 'Sign out'}
+              </button>
+              {logoutError ? (
+                <p className="max-w-xs text-sm leading-6 text-rose-600">
+                  {logoutError}
+                </p>
+              ) : null}
             </div>
           </div>
 
@@ -95,12 +154,12 @@ export function DashboardPage() {
             <SummaryCard
               eyebrow="Rows"
               title="Tracked instruments"
-              value={summary.totalRows.toString()}
+              value={instruments.length.toString()}
             />
             <SummaryCard
-              eyebrow="Volume"
-              title="Aggregated feed volume"
-              value={summary.totalVolume.toLocaleString()}
+              eyebrow="Quotes"
+              title="Live quote updates"
+              value={summary.totalRows.toString()}
             />
             <SummaryCard
               eyebrow="Positive"
@@ -114,8 +173,21 @@ export function DashboardPage() {
             />
           </div>
 
+          {instrumentsError ? (
+            <section className="mt-6 rounded-[28px] border border-rose-200 bg-rose-50 p-6 text-rose-700">
+              <p className="text-xs font-semibold uppercase tracking-[0.28em]">
+                Instruments API issue
+              </p>
+              <p className="mt-3 text-sm leading-7">
+                {instrumentsError instanceof Error
+                  ? instrumentsError.message
+                  : 'Unable to load instruments.'}
+              </p>
+            </section>
+          ) : null}
+
           <div className="mt-8">
-            <DashboardDataTable rows={rows} />
+            <DashboardDataTable instruments={instruments} />
           </div>
 
           {errorMessage ? (

@@ -1,12 +1,18 @@
 export type DashboardRow = {
-  id: string
-  symbol: string
-  price: number
+  ask?: number
+  bid?: number
+  close?: number
   change: number
-  volume: number
+  id: string
+  prev?: number
+  price: number
+  symbol: string
   updatedAt: string
+  volume: number
   status?: string
 }
+
+export type DashboardQuoteMap = Record<string, DashboardRow>
 
 export type DashboardConnectionState =
   | 'connecting'

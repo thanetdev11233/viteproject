@@ -5,15 +5,20 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:developer": "vite --mode developer",
     "build": "tsc -b && vite build",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc -b --pretty false",
+    "check:no-any": "npm run typecheck && npm run lint",
+    "verify:commit": "npm run lint && npm run build",
+    "verify:push": "npm run check:no-any && npm run build",
     "preview": "vite preview",
     "prepare": "husky"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.0",
     "@tanstack/react-query": "^5.100.11",
+    "firebase": "^12.13.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "tailwindcss": "^4.3.0"
